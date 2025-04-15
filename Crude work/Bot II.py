@@ -20,10 +20,13 @@ EMAIL_PASSWORD = 'naqcnmmpmjabkwzy'
 RECIPIENT_EMAIL = 'jackboiz4lyf@gmail.com'
 PASSWORD_EXPIRY = 24 * 60 * 60
 
-# Bot + Equity Settings
-STARTING_BALANCE = 10.0
-TARGET_MULTIPLIER = 1.27
 daily_password = None
+
+# Growth plan configurations
+GROWTH_PLANS = {
+    "30-day": {"starting_balance": 10.0, "target_multiplier": 1.27},
+    "6-month": {"starting_balance": 1.0, "target_multiplier": 1.06}
+}
 
 # Client Bot Registry
 CLIENTS = [
@@ -32,9 +35,18 @@ CLIENTS = [
         "password": "R@lq8kAP",
         "server": "MetaQuotes-Demo",
         "name": "Main Account",
-        "telegram_id": "YOUR_TELEGRAM_CHAT_ID"
+        "telegram_id": "YOUR_TELEGRAM_CHAT_ID",
+        "plan": "30-day"
     },
-    # Add more clients like this with their own telegram_id
+    {
+        "login": 89647216,
+        "password": "examplePass",
+        "server": "MetaQuotes-Demo",
+        "name": "LongTerm Client",
+        "telegram_id": "YOUR_TELEGRAM_CHAT_ID",
+        "plan": "6-month"
+    }
+    # Add more clients and assign them a plan from GROWTH_PLANS
 ]
 
 def send_password_email(password):
@@ -67,6 +79,7 @@ def update_password():
 
 def log_daily_equity():
     for client in CLIENTS:
+        plan_info = GROWTH_PLANS[client["plan"]]
         mt5.initialize(login=client["login"], password=client["password"], server=client["server"])
         account_info = mt5.account_info()
         equity = account_info.equity if account_info else 0
@@ -85,16 +98,17 @@ def log_daily_equity():
             json.dump(log, f, indent=4)
 
         days_passed = len(log)
-        target_equity = round(STARTING_BALANCE * (TARGET_MULTIPLIER ** days_passed), 2)
-        send_daily_update(client["telegram_id"], client["name"], client["login"], equity, target_equity, days_passed)
+        target_equity = round(plan_info["starting_balance"] * (plan_info["target_multiplier"] ** days_passed), 2)
+        send_daily_update(client["telegram_id"], client["name"], client["login"], equity, target_equity, days_passed, client["plan"])
         mt5.shutdown()
 
-def send_daily_update(telegram_id, name, login, balance, target, day):
+def send_daily_update(telegram_id, name, login, balance, target, day, plan):
     status = '✅ On Track' if balance >= target else '⚠️ Below Target'
     message = (
         f"🌅 Good Morning {name}\n"
         f"👤 Account: {login}\n"
-        f"📊 Day {day} of 30\n"
+        f"📋 Plan: {plan}\n"
+        f"📊 Day {day}\n"
         f"💰 Balance: ${balance:.2f}\n"
         f"🎯 Target: ${target:.2f}\n"
         f"📈 Status: {status}"
