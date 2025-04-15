@@ -21,15 +21,20 @@ RECIPIENT_EMAIL = 'jackboiz4lyf@gmail.com'
 PASSWORD_EXPIRY = 24 * 60 * 60
 
 # Bot + Equity Settings
-DAILY_TRACK_FILE = "tracker.json"
 STARTING_BALANCE = 10.0
 TARGET_MULTIPLIER = 1.27
 daily_password = None
 
-# Dummy MT5 Accounts (for later use)
-DUMMY_ACCOUNTS = [
-    {"login": 89647215, "password": "R@lq8kAP", "server": "MetaQuotes-Demo"},
-    # Add more accounts here
+# Client Bot Registry
+CLIENTS = [
+    {
+        "login": 89647215,
+        "password": "R@lq8kAP",
+        "server": "MetaQuotes-Demo",
+        "name": "Main Account",
+        "telegram_id": "YOUR_TELEGRAM_CHAT_ID"
+    },
+    # Add more clients like this with their own telegram_id
 ]
 
 def send_password_email(password):
@@ -61,13 +66,12 @@ def update_password():
         time.sleep(PASSWORD_EXPIRY)
 
 def log_daily_equity():
-    report = []
-    for acc in DUMMY_ACCOUNTS:
-        mt5.initialize(login=acc["login"], password=acc["password"], server=acc["server"])
+    for client in CLIENTS:
+        mt5.initialize(login=client["login"], password=client["password"], server=client["server"])
         account_info = mt5.account_info()
         equity = account_info.equity if account_info else 0
         date_key = datetime.now().strftime("%Y-%m-%d")
-        log_file = f"tracker_{acc['login']}.json"
+        log_file = f"tracker_{client['login']}.json"
 
         if os.path.exists(log_file):
             with open(log_file, 'r') as f:
@@ -82,24 +86,20 @@ def log_daily_equity():
 
         days_passed = len(log)
         target_equity = round(STARTING_BALANCE * (TARGET_MULTIPLIER ** days_passed), 2)
-        report.append((acc["login"], equity, target_equity, days_passed))
+        send_daily_update(client["telegram_id"], client["name"], client["login"], equity, target_equity, days_passed)
         mt5.shutdown()
 
-    send_daily_update(report)
-
-def send_daily_update(account_reports):
-    header = "🌅 Good Morning Boss\nHere's the status for all accounts:\n"
-    body = ""
-    for login, balance, target, day in account_reports:
-        status = '✅ On Track' if balance >= target else '⚠️ Below Target'
-        body += (
-            f"\n👤 Account: {login}\n"
-            f"📊 Day {day} of 30\n"
-            f"💰 Balance: ${balance:.2f}\n"
-            f"🎯 Target: ${target:.2f}\n"
-            f"📈 Status: {status}\n"
-        )
-    bot.send_message(OWNER_CHAT_ID, header + body)
+def send_daily_update(telegram_id, name, login, balance, target, day):
+    status = '✅ On Track' if balance >= target else '⚠️ Below Target'
+    message = (
+        f"🌅 Good Morning {name}\n"
+        f"👤 Account: {login}\n"
+        f"📊 Day {day} of 30\n"
+        f"💰 Balance: ${balance:.2f}\n"
+        f"🎯 Target: ${target:.2f}\n"
+        f"📈 Status: {status}"
+    )
+    bot.send_message(telegram_id, message)
 
 def schedule_daily_update():
     while True:
