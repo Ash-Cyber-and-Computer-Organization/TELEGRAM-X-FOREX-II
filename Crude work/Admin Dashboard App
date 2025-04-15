@@ -1,0 +1,102 @@
+import streamlit as st
+import json
+import pandas as pd
+from datetime import datetime
+
+# ---------- CONFIG ----------
+st.set_page_config(page_title="ForexBot Admin", layout="wide", initial_sidebar_state="collapsed")
+st.markdown("""
+    <style>
+        body {
+            background-color: #000;
+            color: white;
+        }
+        .main {
+            background-color: #000;
+        }
+        .stButton > button {
+            color: white;
+            background-color: #1a1a1a;
+            border: 1px solid #333;
+            padding: 0.75em;
+            border-radius: 8px;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# ---------- COLOR THEMES ----------
+color_palettes = {
+    "Blue": ["#0f4c81", "#0077b6", "#023e8a"],
+    "Green": ["#0f766e", "#10b981", "#22c55e"],
+    "Purple": ["#6b21a8", "#9333ea", "#c084fc"],
+    "Neon": ["#39ff14", "#ff007f", "#fff700"],
+    "Metallics": ["#c0c0c0", "#ffd700"]
+}
+
+# ---------- LOAD CLIENT DATA ----------
+def load_clients():
+    try:
+        with open("clients.json", "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+clients = load_clients()
+
+# ---------- HEADER ----------
+st.title("ForexBot Command Center")
+st.markdown("---")
+
+# ---------- CLIENT PANEL ----------
+st.subheader("Client Overview")
+client_data = []
+
+for client_id, info in clients.items():
+    client_data.append({
+        "Client ID": client_id,
+        "Name": info.get("name"),
+        "Balance ($)": info.get("balance"),
+        "Daily Target ($)": info.get("target"),
+        "Status": info.get("status"),
+        "Last Update": info.get("last_updated")
+    })
+
+client_df = pd.DataFrame(client_data)
+st.dataframe(client_df, use_container_width=True, height=400)
+
+# ---------- ADMIN CONTROLS ----------
+st.subheader("Admin Controls")
+selected_client = st.selectbox("Choose client to manage:", list(clients.keys()))
+
+col1, col2 = st.columns(2)
+
+with col1:
+    mark_hit = st.button("Mark as Target Hit")
+    if mark_hit:
+        clients[selected_client]["status"] = "Target Hit"
+        clients[selected_client]["last_updated"] = str(datetime.now())
+        st.success(f"Marked {selected_client} as Target Hit")
+
+with col2:
+    retry_trade = st.button("Retry Trade")
+    if retry_trade:
+        clients[selected_client]["status"] = "Retrying"
+        clients[selected_client]["last_updated"] = str(datetime.now())
+        st.info(f"Set {selected_client} to retry state")
+
+# ---------- SAVE DATA ----------
+with open("clients.json", "w") as f:
+    json.dump(clients, f, indent=4)
+
+# ---------- COLOR PANELS ----------
+st.markdown("---")
+st.subheader("App Themes")
+for palette, colors in color_palettes.items():
+    st.markdown(f"**{palette} Theme**")
+    st.markdown("""
+    <div style='display:flex; gap:1rem;'>
+        {}  
+    </div>
+    """.format("".join([
+        f"<div style='width:60px;height:30px;background-color:{c};border-radius:5px;'></div>" for c in colors
+    ])), unsafe_allow_html=True)
