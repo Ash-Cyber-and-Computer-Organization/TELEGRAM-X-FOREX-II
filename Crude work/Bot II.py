@@ -123,7 +123,43 @@ def schedule_daily_update():
             time.sleep(60)
         time.sleep(30)
 
+def check_drawdown_and_close():
+    for client in CLIENTS:
+        plan_info = GROWTH_PLANS[client["plan"]]
+        mt5.initialize(login=client["login"], password=client["password"], server=client["server"])
+        account_info = mt5.account_info()
+        if account_info:
+            current_equity = account_info.equity
+            threshold = plan_info["starting_balance"] * 0.10
+            if current_equity < threshold:
+                positions = mt5.positions_get()
+                if positions:
+                    for pos in positions:
+                        if pos.profit < 0:
+                            close_trade(pos)
+                    bot.send_message(client["telegram_id"], "🚨 Equity dropped below 10%. Losing trades were closed automatically.")
+        mt5.shutdown()
+
+def close_trade(position):
+    price = mt5.symbol_info_tick(position.symbol).bid if position.type == mt5.ORDER_TYPE_BUY else mt5.symbol_info_tick(position.symbol).ask
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": position.symbol,
+        "volume": position.volume,
+        "type": mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
+        "position": position.ticket,
+        "price": price,
+        "deviation": 10,
+        "magic": 234000,
+        "comment": "Auto-close due to drawdown",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC,
+    }
+    result = mt5.order_send(request)
+    print(f"Closed trade {position.ticket} with result: {result}")
+
 if __name__ == "__main__":
     Thread(target=update_password, daemon=True).start()
-    Thread(target=schedule_daily_update).start()
+    Thread(target=schedule_daily_update, daemon=True).start()
+    Thread(target=check_drawdown_and_close, daemon=True).start()
     bot.polling()
