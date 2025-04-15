@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import pandas as pd
 from datetime import datetime
+import MetaTrader5 as mt5
 
 # ---------- CONFIG ----------
 st.set_page_config(page_title="ForexBot Admin", layout="wide", initial_sidebar_state="collapsed")
@@ -87,6 +88,42 @@ with col2:
 # ---------- SAVE DATA ----------
 with open("clients.json", "w") as f:
     json.dump(clients, f, indent=4)
+
+# ---------- REAL-TIME ANALYSIS PANEL ----------
+st.markdown("---")
+st.subheader("Real-Time Market Analysis")
+
+# MT5 Login (Assumes already logged in elsewhere in your app setup)
+MT5_LOGIN = 89647215
+MT5_PASSWORD = "R@lq8kAP"
+MT5_SERVER = "MetaQuotes-Demo"
+
+if not mt5.initialize(login=MT5_LOGIN, password=MT5_PASSWORD, server=MT5_SERVER):
+    st.error("Failed to connect to MetaTrader 5")
+else:
+    watchlist = ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "BTCUSD"]
+    symbol_data = []
+
+    for symbol in watchlist:
+        tick = mt5.symbol_info_tick(symbol)
+        info = mt5.symbol_info(symbol)
+
+        if tick and info:
+            symbol_data.append({
+                "Symbol": symbol,
+                "Bid": tick.bid,
+                "Ask": tick.ask,
+                "Spread": round(tick.ask - tick.bid, 5),
+                "Digits": info.digits
+            })
+
+    if symbol_data:
+        df = pd.DataFrame(symbol_data)
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("No market data available.")
+
+    mt5.shutdown()
 
 # ---------- COLOR PANELS ----------
 st.markdown("---")
