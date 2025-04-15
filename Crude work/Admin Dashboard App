@@ -3,6 +3,10 @@ import json
 import pandas as pd
 from datetime import datetime
 import MetaTrader5 as mt5
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import os
 
 # ---------- CONFIG ----------
 st.set_page_config(page_title="ForexBot Admin", layout="wide", initial_sidebar_state="collapsed")
@@ -25,6 +29,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+EMAIL_ADDRESS = 'forexbot247@gmail.com'
+EMAIL_PASSWORD = 'naqcnmmpmjabkwzy'
+
 # ---------- COLOR THEMES ----------
 color_palettes = {
     "Blue": ["#0f4c81", "#0077b6", "#023e8a"],
@@ -44,6 +51,23 @@ def load_clients():
 
 clients = load_clients()
 
+# ---------- EMAIL FUNCTION ----------
+def send_payout_email(recipient, amount):
+    subject = "ForexBot Payout Confirmation"
+    body = f"Your payout of ${amount:.2f} has been successfully transferred to your MT5 account."
+    msg = MIMEMultipart()
+    msg["From"] = EMAIL_ADDRESS
+    msg["To"] = recipient
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_ADDRESS, recipient, msg.as_string())
+    except Exception as e:
+        st.error(f"Failed to send payout email: {e}")
+
 # ---------- HEADER ----------
 st.title("ForexBot Command Center")
 st.markdown("---")
@@ -58,6 +82,7 @@ for client_id, info in clients.items():
         "Name": info.get("name"),
         "Balance ($)": info.get("balance"),
         "Daily Target ($)": info.get("target"),
+        "Profit Today ($)": info.get("profit_today", 0),
         "Status": info.get("status"),
         "Last Update": info.get("last_updated")
     })
@@ -69,21 +94,33 @@ st.dataframe(client_df, use_container_width=True, height=400)
 st.subheader("Admin Controls")
 selected_client = st.selectbox("Choose client to manage:", list(clients.keys()))
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 
 with col1:
-    mark_hit = st.button("Mark as Target Hit")
-    if mark_hit:
+    if st.button("Mark as Target Hit"):
         clients[selected_client]["status"] = "Target Hit"
         clients[selected_client]["last_updated"] = str(datetime.now())
         st.success(f"Marked {selected_client} as Target Hit")
 
 with col2:
-    retry_trade = st.button("Retry Trade")
-    if retry_trade:
+    if st.button("Retry Trade"):
         clients[selected_client]["status"] = "Retrying"
         clients[selected_client]["last_updated"] = str(datetime.now())
         st.info(f"Set {selected_client} to retry state")
+
+with col3:
+    if st.button("Send Payout"):
+        profit = float(clients[selected_client].get("profit_today", 0))
+        client_cut = profit * 0.75
+        clients[selected_client]["balance"] = clients[selected_client].get("balance", 0) + client_cut
+        clients[selected_client]["profit_today"] = 0
+        clients[selected_client]["last_updated"] = str(datetime.now())
+        recipient_email = clients[selected_client].get("email", "")
+        if recipient_email:
+            send_payout_email(recipient_email, client_cut)
+            st.success(f"Payout of ${client_cut:.2f} sent to {recipient_email}")
+        else:
+            st.warning("No email on file for this client.")
 
 # ---------- SAVE DATA ----------
 with open("clients.json", "w") as f:
@@ -93,7 +130,6 @@ with open("clients.json", "w") as f:
 st.markdown("---")
 st.subheader("Real-Time Market Analysis")
 
-# MT5 Login (Assumes already logged in elsewhere in your app setup)
 MT5_LOGIN = 89647215
 MT5_PASSWORD = "R@lq8kAP"
 MT5_SERVER = "MetaQuotes-Demo"
@@ -107,7 +143,6 @@ else:
     for symbol in watchlist:
         tick = mt5.symbol_info_tick(symbol)
         info = mt5.symbol_info(symbol)
-
         if tick and info:
             symbol_data.append({
                 "Symbol": symbol,
