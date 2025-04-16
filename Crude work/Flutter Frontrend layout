@@ -1,0 +1,91 @@
+// lib/main.dart
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+void main() {
+  runApp(AlgoBankApp());
+}
+
+class AlgoBankApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'AlgoBank Dashboard',
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: Color(0xFF0D0D0D),
+        colorScheme: ColorScheme.dark(
+          primary: Colors.purple.shade400,
+          secondary: Colors.amber.shade400,
+          surface: Colors.blue.shade900,
+        ),
+        textTheme: TextTheme(
+          headline6: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold),
+          bodyText2: TextStyle(color: Colors.white70),
+        ),
+      ),
+      home: ClientDashboard(),
+    );
+  }
+}
+
+class ClientDashboard extends StatefulWidget {
+  @override
+  _ClientDashboardState createState() => _ClientDashboardState();
+}
+
+class _ClientDashboardState extends State<ClientDashboard> {
+  List<dynamic> clients = [];
+
+  Future<void> fetchClients() async {
+    final response = await http.get(Uri.parse('http://YOUR_FASTAPI_HOST/clients'));
+    if (response.statusCode == 200) {
+      setState(() {
+        clients = json.decode(response.body);
+      });
+    } else {
+      print('Failed to load clients');
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    fetchClients();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('📊 AlgoBank Portfolio'),
+        backgroundColor: Colors.purple.shade700,
+      ),
+      body: ListView.builder(
+        itemCount: clients.length,
+        itemBuilder: (context, index) {
+          final client = clients[index];
+          return Card(
+            margin: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            color: Theme.of(context).colorScheme.surface,
+            child: ListTile(
+              title: Text(
+                '${client['name']} • ${client['plan']}',
+                style: Theme.of(context).textTheme.headline6,
+              ),
+              subtitle: Text(
+                'Balance: \$${client['balance']}\nTarget: \$${client['target']}\nDay: ${client['day']}\nStatus: ${client['status']}',
+                style: Theme.of(context).textTheme.bodyText2,
+              ),
+              onTap: () {
+                // Future: Navigate to detail screen
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
