@@ -5,13 +5,18 @@ import json
 import os
 import re
 import MetaTrader5 as mt5
+import telebot
 
 app = FastAPI()
 
+# Telegram Bot Integration
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or "7597638064:AAEm828isgdGJB2atT3O5h774B_s8iN0y64"
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+
 # Dummy client registry
 CLIENTS = [
-    {"login": 89647215, "name": "Main Account", "plan": "30-day", "password": "R@lq8kAP", "server": "MetaQuotes-Demo"},
-    {"login": 89647216, "name": "LongTerm Client", "plan": "6-month", "password": "examplePass", "server": "MetaQuotes-Demo"},
+    {"login": 89647215, "name": "Main Account", "plan": "30-day", "password": "R@lq8kAP", "server": "MetaQuotes-Demo", "telegram_id": "YOUR_TELEGRAM_CHAT_ID"},
+    {"login": 89647216, "name": "LongTerm Client", "plan": "6-month", "password": "examplePass", "server": "MetaQuotes-Demo", "telegram_id": "YOUR_TELEGRAM_CHAT_ID"},
 ]
 
 GROWTH_PLANS = {
@@ -44,7 +49,9 @@ class SignalRequest(BaseModel):
 
 @app.post("/parse-signal")
 def parse_signal(signal: SignalRequest):
-    raw = signal.raw_signal
+    return handle_signal(signal.raw_signal, signal.login)
+
+def handle_signal(raw: str, login: int):
     result = {
         "symbol": None,
         "action": None,
@@ -53,7 +60,6 @@ def parse_signal(signal: SignalRequest):
         "tp": None
     }
     try:
-        # Basic flexible extraction
         symbol_match = re.search(r"[A-Z]{6,7}", raw)
         action_match = re.search(r"\\b(BUY|SELL)\\b", raw, re.IGNORECASE)
         sl_match = re.search(r"SL[:\\-]?\\s*(\\d+(\\.\\d+)?)", raw, re.IGNORECASE)
@@ -71,19 +77,16 @@ def parse_signal(signal: SignalRequest):
         if lot_match:
             result["volume"] = float(lot_match.group(1))
 
-        # Fallbacks if SL/TP come without prefix
         if not result["sl"] or not result["tp"]:
             numbers = list(map(float, re.findall(r"\\d+\\.\\d+", raw)))
             if len(numbers) >= 2:
                 result["sl"] = result["sl"] or numbers[0]
                 result["tp"] = result["tp"] or numbers[1]
 
-        # Validation
         if None in (result["symbol"], result["action"], result["sl"], result["tp"]):
             return {"error": "Could not parse full signal. Provide symbol, action, SL, and TP."}
 
-        # Auto-execute trade
-        client = next((c for c in CLIENTS if c["login"] == signal.login), None)
+        client = next((c for c in CLIENTS if c["login"] == login), None)
         if not client:
             return {"error": "Client not found."}
 
@@ -110,6 +113,19 @@ def parse_signal(signal: SignalRequest):
         mt5.shutdown()
 
         return {"parsed": result, "order_result": {"retcode": result_exec.retcode, "comment": result_exec.comment}}
-
     except Exception as e:
         return {"error": f"Parsing failed: {str(e)}"}
+
+@bot.message_handler(func=lambda message: True)
+def receive_signal(message):
+    telegram_id = str(message.chat.id)
+    client = next((c for c in CLIENTS if c.get("telegram_id") == telegram_id), None)
+    if client:
+        result = handle_signal(message.text, client["login"])
+        feedback = result.get("order_result", {}).get("comment", "Signal received.")
+        bot.reply_to(message, f"🚀 Signal executed: {feedback}")
+    else:
+        bot.reply_to(message, "❌ Unauthorized or unlinked Telegram account.")
+
+import threading
+threading.Thread(target=bot.polling, daemon=True).start()
