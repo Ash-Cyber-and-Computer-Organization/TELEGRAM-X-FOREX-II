@@ -1,0 +1,182 @@
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import List, Optional
+import json
+import os
+import MetaTrader5 as mt5
+
+app = FastAPI()
+
+# Dummy client registry
+CLIENTS = [
+    {"login": 89647215, "name": "Main Account", "plan": "30-day", "password": "R@lq8kAP", "server": "MetaQuotes-Demo"},
+    {"login": 89647216, "name": "LongTerm Client", "plan": "6-month", "password": "examplePass", "server": "MetaQuotes-Demo"},
+]
+
+GROWTH_PLANS = {
+    "30-day": {"starting_balance": 10.0, "target_multiplier": 1.27},
+    "6-month": {"starting_balance": 1.0, "target_multiplier": 1.06}
+}
+
+class ClientStatus(BaseModel):
+    login: int
+    name: str
+    plan: str
+    balance: float
+    target: float
+    day: int
+    status: str
+
+@app.get("/clients", response_model=List[ClientStatus])
+def get_clients():
+    results = []
+    for client in CLIENTS:
+        login = client["login"]
+        plan = client["plan"]
+        name = client["name"]
+        log_file = f"tracker_{login}.json"
+        if os.path.exists(log_file):
+            with open(log_file, 'r') as f:
+                log = json.load(f)
+            days = len(log)
+            equity = list(log.values())[-1] if log else 0
+        else:
+            equity = 0
+            days = 0
+
+        plan_config = GROWTH_PLANS[plan]
+        target = round(plan_config["starting_balance"] * (plan_config["target_multiplier"] ** days), 2)
+        status = "on-track" if equity >= target else "below-target"
+
+        results.append(ClientStatus(
+            login=login,
+            name=name,
+            plan=plan,
+            balance=equity,
+            target=target,
+            day=days,
+            status=status
+        ))
+    return results
+
+@app.get("/client/{login}/history")
+def get_client_history(login: int):
+    log_file = f"tracker_{login}.json"
+    if os.path.exists(log_file):
+        with open(log_file, 'r') as f:
+            return json.load(f)
+    return {"error": "No history found for this client."}
+
+@app.get("/client/{login}/trades")
+def get_open_trades(login: int):
+    client = next((c for c in CLIENTS if c["login"] == login), None)
+    if not client:
+        return {"error": "Client not found."}
+    mt5.initialize(login=client["login"], password=client["password"], server=client["server"])
+    positions = mt5.positions_get()
+    trades = []
+    if positions:
+        for pos in positions:
+            trades.append({
+                "ticket": pos.ticket,
+                "symbol": pos.symbol,
+                "volume": pos.volume,
+                "type": "BUY" if pos.type == mt5.ORDER_TYPE_BUY else "SELL",
+                "entry_price": pos.price_open,
+                "sl": pos.sl,
+                "tp": pos.tp,
+                "profit": pos.profit
+            })
+    mt5.shutdown()
+    return trades
+
+@app.get("/client/{login}/check-drawdown")
+def check_drawdown(login: int):
+    client = next((c for c in CLIENTS if c["login"] == login), None)
+    if not client:
+        return {"error": "Client not found."}
+
+    plan_info = GROWTH_PLANS[client["plan"]]
+    mt5.initialize(login=client["login"], password=client["password"], server=client["server"])
+    account_info = mt5.account_info()
+    closed_positions = []
+    if account_info:
+        current_equity = account_info.equity
+        threshold = plan_info["starting_balance"] * 0.10
+        if current_equity < threshold:
+            positions = mt5.positions_get()
+            if positions:
+                for pos in positions:
+                    if pos.profit < 0:
+                        result = close_trade(pos)
+                        closed_positions.append({"ticket": pos.ticket, "status": result.retcode})
+    mt5.shutdown()
+    return {"closed": closed_positions}
+
+class TradeRequest(BaseModel):
+    symbol: str
+    action: str
+    volume: float
+    sl: float
+    tp: float
+
+@app.post("/client/{login}/trade")
+def open_trade(login: int, trade: TradeRequest):
+    client = next((c for c in CLIENTS if c["login"] == login), None)
+    if not client:
+        return {"error": "Client not found."}
+    mt5.initialize(login=client["login"], password=client["password"], server=client["server"])
+    tick = mt5.symbol_info_tick(trade.symbol)
+    order_type = mt5.ORDER_TYPE_BUY if trade.action.upper() == "BUY" else mt5.ORDER_TYPE_SELL
+    price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": trade.symbol,
+        "volume": trade.volume,
+        "type": order_type,
+        "price": price,
+        "sl": trade.sl,
+        "tp": trade.tp,
+        "deviation": 10,
+        "magic": 234000,
+        "comment": "Manual trade",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC,
+    }
+    result = mt5.order_send(request)
+    mt5.shutdown()
+    return {"retcode": result.retcode, "comment": result.comment}
+
+class CloseRequest(BaseModel):
+    position_id: int
+
+@app.post("/client/{login}/close-trade")
+def close_trade_request(login: int, close: CloseRequest):
+    client = next((c for c in CLIENTS if c["login"] == login), None)
+    if not client:
+        return {"error": "Client not found."}
+    mt5.initialize(login=client["login"], password=client["password"], server=client["server"])
+    pos = next((p for p in mt5.positions_get() if p.ticket == close.position_id), None)
+    if pos:
+        result = close_trade(pos)
+        mt5.shutdown()
+        return {"retcode": result.retcode, "comment": result.comment}
+    mt5.shutdown()
+    return {"error": "Position not found."}
+
+def close_trade(position):
+    price = mt5.symbol_info_tick(position.symbol).bid if position.type == mt5.ORDER_TYPE_BUY else mt5.symbol_info_tick(position.symbol).ask
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": position.symbol,
+        "volume": position.volume,
+        "type": mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
+        "position": position.ticket,
+        "price": price,
+        "deviation": 10,
+        "magic": 234000,
+        "comment": "Closed via API",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC,
+    }
+    return mt5.order_send(request)
