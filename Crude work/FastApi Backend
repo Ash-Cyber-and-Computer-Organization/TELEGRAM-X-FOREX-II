@@ -19,8 +19,28 @@ GROWTH_PLANS = {
     "6-month": {"starting_balance": 1.0, "target_multiplier": 1.06}
 }
 
+DEFAULT_LOT_SIZE = 0.01
+
+def close_trade(position):
+    price = mt5.symbol_info_tick(position.symbol).bid if position.type == mt5.ORDER_TYPE_BUY else mt5.symbol_info_tick(position.symbol).ask
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": position.symbol,
+        "volume": position.volume,
+        "type": mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
+        "position": position.ticket,
+        "price": price,
+        "deviation": 10,
+        "magic": 234000,
+        "comment": "Closed via API",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC,
+    }
+    return mt5.order_send(request)
+
 class SignalRequest(BaseModel):
     raw_signal: str
+    login: int
 
 @app.post("/parse-signal")
 def parse_signal(signal: SignalRequest):
@@ -28,7 +48,7 @@ def parse_signal(signal: SignalRequest):
     result = {
         "symbol": None,
         "action": None,
-        "volume": 0.01,
+        "volume": DEFAULT_LOT_SIZE,
         "sl": None,
         "tp": None
     }
@@ -62,6 +82,34 @@ def parse_signal(signal: SignalRequest):
         if None in (result["symbol"], result["action"], result["sl"], result["tp"]):
             return {"error": "Could not parse full signal. Provide symbol, action, SL, and TP."}
 
-        return result
+        # Auto-execute trade
+        client = next((c for c in CLIENTS if c["login"] == signal.login), None)
+        if not client:
+            return {"error": "Client not found."}
+
+        mt5.initialize(login=client["login"], password=client["password"], server=client["server"])
+        tick = mt5.symbol_info_tick(result["symbol"])
+        order_type = mt5.ORDER_TYPE_BUY if result["action"] == "BUY" else mt5.ORDER_TYPE_SELL
+        price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
+
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": result["symbol"],
+            "volume": result["volume"],
+            "type": order_type,
+            "price": price,
+            "sl": result["sl"],
+            "tp": result["tp"],
+            "deviation": 10,
+            "magic": 234000,
+            "comment": "Signal Auto-Trade",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        result_exec = mt5.order_send(request)
+        mt5.shutdown()
+
+        return {"parsed": result, "order_result": {"retcode": result_exec.retcode, "comment": result_exec.comment}}
+
     except Exception as e:
         return {"error": f"Parsing failed: {str(e)}"}
