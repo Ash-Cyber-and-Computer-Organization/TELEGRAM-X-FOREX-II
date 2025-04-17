@@ -57,7 +57,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
   Map<String, dynamic> history = {};
 
   Future<void> fetchHistory() async {
-    final response = await http.get(Uri.parse('http://YOUR_FASTAPI_HOST/client/${widget.login}/history'));
+    final response = await http.get(Uri.parse('http://localhost:8000/client/${widget.login}/history'));
     if (response.statusCode == 200) {
       setState(() {
         history = json.decode(response.body);
