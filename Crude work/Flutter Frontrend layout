@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 void main() {
   runApp(AlgoBankApp());
@@ -25,66 +27,99 @@ class AlgoBankApp extends StatelessWidget {
           bodyText2: TextStyle(color: Colors.white70),
         ),
       ),
-      home: ClientDashboard(),
+      home: LoginScreen(),
     );
   }
 }
 
-class ClientDashboard extends StatefulWidget {
-  @override
-  _ClientDashboardState createState() => _ClientDashboardState();
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+Future<void> showNotification(String title, String body) async {
+  const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+    'channel_id', 'channel_name',
+    importance: Importance.max,
+    priority: Priority.high,
+    color: Colors.purple,
+  );
+  const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+  await flutterLocalNotificationsPlugin.show(0, title, body, platformDetails);
 }
 
-class _ClientDashboardState extends State<ClientDashboard> {
-  List<dynamic> clients = [];
+class ClientDetailScreen extends StatefulWidget {
+  final int login;
+  ClientDetailScreen({required this.login});
 
-  Future<void> fetchClients() async {
-    final response = await http.get(Uri.parse('http://YOUR_FASTAPI_HOST/clients'));
+  @override
+  _ClientDetailScreenState createState() => _ClientDetailScreenState();
+}
+
+class _ClientDetailScreenState extends State<ClientDetailScreen> {
+  Map<String, dynamic> history = {};
+
+  Future<void> fetchHistory() async {
+    final response = await http.get(Uri.parse('http://YOUR_FASTAPI_HOST/client/${widget.login}/history'));
     if (response.statusCode == 200) {
       setState(() {
-        clients = json.decode(response.body);
+        history = json.decode(response.body);
       });
-    } else {
-      print('Failed to load clients');
+      showNotification('📈 Equity Updated', 'Latest equity for ${widget.login} has been fetched.');
     }
   }
 
   @override
   void initState() {
     super.initState();
-    fetchClients();
+    fetchHistory();
+  }
+
+  List<FlSpot> getChartData() {
+    List<FlSpot> spots = [];
+    int i = 0;
+    history.forEach((key, value) {
+      spots.add(FlSpot(i.toDouble(), value.toDouble()));
+      i++;
+    });
+    return spots;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('📊 AlgoBank Portfolio'),
-        backgroundColor: Colors.purple.shade700,
-      ),
-      body: ListView.builder(
-        itemCount: clients.length,
-        itemBuilder: (context, index) {
-          final client = clients[index];
-          return Card(
-            margin: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            color: Theme.of(context).colorScheme.surface,
-            child: ListTile(
-              title: Text(
-                '${client['name']} • ${client['plan']}',
-                style: Theme.of(context).textTheme.headline6,
+      appBar: AppBar(title: Text('📈 Client History'), backgroundColor: Colors.purple.shade700),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: history.isEmpty
+            ? Center(child: CircularProgressIndicator())
+            : Column(
+                children: [
+                  SizedBox(
+                    height: 200,
+                    child: LineChart(
+                      LineChartData(
+                        titlesData: FlTitlesData(show: false),
+                        borderData: FlBorderData(show: false),
+                        lineBarsData: [
+                          LineChartBarData(
+                            isCurved: true,
+                            color: Colors.amber,
+                            dotData: FlDotData(show: false),
+                            spots: getChartData(),
+                          )
+                        ],
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 20),
+                  Expanded(
+                    child: ListView(
+                      children: history.entries.map((entry) => ListTile(
+                            title: Text('📅 ${entry.key}'),
+                            trailing: Text('Equity: \$${entry.value.toStringAsFixed(2)}'),
+                          )).toList(),
+                    ),
+                  )
+                ],
               ),
-              subtitle: Text(
-                'Balance: \$${client['balance']}\nTarget: \$${client['target']}\nDay: ${client['day']}\nStatus: ${client['status']}',
-                style: Theme.of(context).textTheme.bodyText2,
-              ),
-              onTap: () {
-                // Future: Navigate to detail screen
-              },
-            ),
-          );
-        },
       ),
     );
   }
